@@ -38,3 +38,15 @@ func DownloadURL2File(filename, url string, limit int64) (err error) {
 	_, err = io.Copy(out, resp.Body)
 	return err
 }
+
+// ClearDir 清理目录
+func ClearDir(dirname string) (err error) {
+	fs, err := os.Stat(dirname)
+	if err != nil {
+		return
+	}
+	if !fs.IsDir() {
+		return fmt.Errorf("ClearDir: the dirname is not a dir")
+	}
+	return os.RemoveAll(dirname)
+}

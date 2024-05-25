@@ -1,5 +1,6 @@
 package m3u8_download
 
+// 注意：包名m3u8_download最好与文件夹名一致，否则在引用包时需适配
 import (
 	"fmt"
 	"io"
@@ -13,7 +14,10 @@ import (
 
 	"github.com/DLL5/tools/common.go"
 	"github.com/google/uuid"
+	"github.com/panjf2000/ants"
 )
+
+var pool, _ = ants.NewPool(10000)
 
 // M3U8Downloader m3u8下载器
 type M3U8Downloader struct {
@@ -21,7 +25,7 @@ type M3U8Downloader struct {
 	MetaURL        string   `json:"meta_url"`          // m3u8的元文件的链接
 	VideoURLs      []string `json:"video_ur_ls"`       // 从元文件中解析出来的视频链接
 	DirName        string   `json:"dir_name"`          // 下载文件所保存的目录
-	TmpVideoName   []string `json:"tmp_video_name"`    // 所有分片文件的名字列表
+	TmpVideoNames  []string `json:"tmp_video_names"`   // 所有分片文件的名字列表
 	DontTransToMP4 bool     `json:"dont_trans_to_mp4"` // 是否不转换为mp4格式，默认为false，即转换为mp4
 	FfmpegCmd      string   `json:"ffmpeg_cmd"`
 }
@@ -43,11 +47,11 @@ func New(name, url string, opts []OptFunc) *M3U8Downloader {
 		name += ".mp4"
 	}
 	m := &M3U8Downloader{
-		FileName:     name,
-		MetaURL:      url,
-		VideoURLs:    make([]string, 0),
-		TmpVideoName: make([]string, 0),
-		FfmpegCmd:    defaultFfmpegCmd(),
+		FileName:      name,
+		MetaURL:       url,
+		VideoURLs:     make([]string, 0),
+		TmpVideoNames: make([]string, 0),
+		FfmpegCmd:     defaultFfmpegCmd(),
 	}
 	for _, v := range opts {
 		v(m)
@@ -105,24 +109,26 @@ func (m *M3U8Downloader) Download() (err error) {
 	for i, v := range m.VideoURLs {
 		ch <- 0
 		wg.Add(1)
-		go func(index int, name, url string, wgg *sync.WaitGroup) {
-			defer func() { wgg.Done(); <-ch }()
+		name := filepath.Join(dirname, strconv.Itoa(i)+".ts")
+		url := v
+		pool.Submit(func() {
+			defer func() { wg.Done(); <-ch }()
 			for retry := 0; retry < 3; retry++ {
 				subErr := common.DownloadURL2File(name, url, 1<<30)
 				if subErr == nil {
-					tmpFileName[index] = name
+					tmpFileName[i] = name
 					break
 				}
 			}
-		}(i, filepath.Join(dirname, strconv.Itoa(i)+".ts"), v, wg)
+		})
 	}
 	wg.Wait()
-	m.TmpVideoName = make([]string, 0, len(tmpFileName))
+	m.TmpVideoNames = make([]string, 0, len(tmpFileName))
 	for _, v := range tmpFileName {
 		if v == "" {
 			continue
 		}
-		m.TmpVideoName = append(m.TmpVideoName, v)
+		m.TmpVideoNames = append(m.TmpVideoNames, v)
 	}
 	return
 }
@@ -131,7 +137,8 @@ func (m *M3U8Downloader) Download() (err error) {
 func (m *M3U8Downloader) Trans2MP4() (err error) {
 	fmt.Printf("start trans2mp4, %s\n", m)
 	// ffmpeg -i "concat:input_1.ts|input_2.ts" -c copy output.mp4
-	parameters := []string{"-i", "concat:" + strings.Join(m.TmpVideoName, "|"), "-c", "copy", filepath.Join(m.DirName, m.FileName)}
+	// 注意： 命令中的参数"concat:input_1.ts|input_2.ts"前后的双引号，在下方的参数数组中不要加上，否则运行会报错
+	parameters := []string{"-i", "concat:" + strings.Join(m.TmpVideoNames, "|"), "-c", "copy", filepath.Join(m.DirName, m.FileName)}
 	cmd := exec.Command(defaultFfmpegCmd(), parameters...)
 	fmt.Println(cmd.String())
 	cmd.Stderr = os.Stdout
@@ -170,4 +177,12 @@ func FfmpegCmdOpt(ffmpeg string) OptFunc {
 	return func(m *M3U8Downloader) {
 		m.FfmpegCmd = ffmpeg
 	}
+}
+
+// ClearDownloadDir 清理文件下载到的目录
+func ClearDownloadDir(m *M3U8Downloader) (err error) {
+	if m != nil {
+		return common.ClearDir(m.DirName)
+	}
+	return
 }
