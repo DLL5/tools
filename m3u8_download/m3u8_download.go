@@ -1,4 +1,4 @@
-package m3u8download
+package m3u8_download
 
 import (
 	"fmt"
