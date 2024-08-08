@@ -23,6 +23,7 @@ var pool, _ = ants.NewPool(10000)
 type M3U8Downloader struct {
 	FileName       string   `json:"file_name"`         // 转为mp4的输出视频的名字，如果没有则默认为output.mp4，如果不是.mp4后缀则自动加此后缀
 	MetaURL        string   `json:"meta_url"`          // m3u8的元文件的链接
+	Domain         string   `json:"domain"`            // 域名
 	VideoURLs      []string `json:"video_ur_ls"`       // 从元文件中解析出来的视频链接
 	DirName        string   `json:"dir_name"`          // 下载文件所保存的目录
 	TmpVideoNames  []string `json:"tmp_video_names"`   // 所有分片文件的名字列表
@@ -59,6 +60,11 @@ func New(name, url string, opts []OptFunc) *M3U8Downloader {
 	return m
 }
 
+func (m *M3U8Downloader) SetDomain(domain string) *M3U8Downloader {
+	m.Domain = domain
+	return m
+}
+
 // 实现Stringer接口，定义字符串格式化%s的打印内容
 func (m *M3U8Downloader) String() string {
 	return fmt.Sprintf("the filename:%s,the meta_url:%s", m.FileName, m.MetaURL)
@@ -77,8 +83,12 @@ func (m *M3U8Downloader) Parse() (err error) {
 		return
 	}
 	for _, v := range strings.Split(string(metaInfo), "\n") {
-		if strings.HasPrefix(v, "http") {
+		if strings.HasPrefix(v, "#") {
+			continue
+		} else if strings.HasPrefix(v, "http") {
 			m.VideoURLs = append(m.VideoURLs, v)
+		} else {
+			m.VideoURLs = append(m.VideoURLs, m.Domain+v)
 		}
 	}
 	return
